@@ -13,7 +13,6 @@ cuda:
 lib:
 	python -m pip install -r requirements.txt
 	python -m pip install tensorboard jupyter  
-	python -m pip install torch==1.13 #--pre --extra-index-url https://download.pytorch.org/whl/nightly/cu116
-	python -m pip install torchvision
+	#python -m pip install torch==1.13 --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 
 
