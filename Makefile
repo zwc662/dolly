@@ -4,6 +4,8 @@ VENV=venv
 venv:
 	conda create -n $(VENV) python=3.9
 	conda activate $(VENV)
+
+lib:
 	python -m pip install -r requirement.txt
 	python -m pip install tensorboard 
 	conda install -c "nvidia/label/cuda-$(CUDA_VERSION)" cuda-nvcc cuda-toolkit libcusparse-dev libcusolver-dev 
