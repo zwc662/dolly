@@ -1,5 +1,5 @@
 CUDA_VERSION=
-
+VENV=venv
 
 venv:
 	conda create -n $(VENV) python=3.9
