@@ -1,4 +1,4 @@
-CUDAR_VERSION=
+CUDA_VERSION=
 
 
 venv:
