@@ -1,4 +1,3 @@
-CUDA_VERSION=
 VENV=venv
 
 venv:
