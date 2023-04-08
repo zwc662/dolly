@@ -1,5 +1,7 @@
 VENV=venv
-# Recommended ${CUDA_VERSION}=11.7.0
+# Recommended for universal compatibility ${CUDA_VERSION}=11.6.0
+CUDA_VERSION=11.6.0
+
 venv:
 	conda create -n ${VENV} python=3.9
 	conda activate ${VENV}
@@ -13,8 +15,8 @@ cuda:
 lib:
 	python -m pip install tensorboard jupyter 
 	python -m pip install -r requirements.txt
-	#python -m pip uninstall deepspeed torch
-	#python -m pip install torch==1.13 --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu116
-	#python -m pip install deepspeed==0.8.0
+	python -m pip uninstall deepspeed torch
+	python -m pip install torch==1.13 --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu116
+	python -m pip install deepspeed==0.8.0
 
 

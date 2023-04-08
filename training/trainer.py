@@ -32,7 +32,8 @@ from transformers import (
 from .consts import (
     DEFAULT_INPUT_MODEL,
     DEFAULT_SEED,
-    DEFAULT_TRAINING_DATASET,
+    WIKISQL_TRAINING_DATASET,
+    HEADER_KEY,
     END_KEY,
     INSTRUCTION_KEY,
     RESPONSE_KEY_NL,
@@ -72,6 +73,38 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
 
         return batch
 
+class DataCollatorForSQLGenerationOnlyLM(DataCollatorForLanguageModeling):
+    def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+        batch = super().torch_call(examples)
+
+        # The prompt ends with the response key plus a newline.  We encode this and then try to find it in the
+        # sequence of tokens.  This should just be a single token.
+        response_token_ids = self.tokenizer.encode(RESPONSE_KEY_NL)
+
+        labels = batch["labels"].clone()
+
+        for i in range(len(examples)):
+
+            response_token_ids_start_idx = None
+            for idx in np.where(batch["labels"][i] == response_token_ids[0])[0]:
+                response_token_ids_start_idx = idx
+                break
+
+            if response_token_ids_start_idx is None:
+                raise RuntimeError(
+                    f'Could not find response key {response_token_ids} in token IDs {batch["labels"][i]}'
+                )
+
+            response_token_ids_end_idx = response_token_ids_start_idx + 1
+
+            # Make pytorch loss function ignore all tokens up through the end of the response key
+            labels[i, :response_token_ids_end_idx] = -100
+
+        batch["labels"] = labels
+
+        return batch
+
+
 
 def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_length: int) -> dict:
     return tokenizer(
@@ -80,8 +113,15 @@ def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_lengt
         truncation=True,
     )
 
+def preprocess_wikisql_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_length: int) -> dict:
+    return tokenizer(
+        batch["text"],
+        max_length=max_length,
+        truncation=True,
+    )
 
-def load_training_dataset(training_data_id: str = DEFAULT_TRAINING_DATASET, split: str = "train") -> Dataset:
+
+def load_training_dataset(training_data_id: str = WIKISQL_TRAINING_DATASET, split: str = "train") -> Dataset:
     logger.info(f"Loading {training_data_id} dataset")
     dataset: Dataset = load_dataset(training_data_id)[split]
     logger.info("Found %d rows", dataset.num_rows)
@@ -98,12 +138,32 @@ def load_training_dataset(training_data_id: str = DEFAULT_TRAINING_DATASET, spli
 
     return dataset
 
+def load_wikisql_training_dataset(training_data_id: str = WIKISQL_TRAINING_DATASET, split: str = "train") -> Dataset:
+    logger.info(f"Loading {training_data_id} dataset")
+    dataset: Dataset = load_dataset(training_data_id)[split]
+    logger.info("Found %d rows", dataset.num_rows)
+
+    # Remove empty responses
+    def _func(rec):
+        rec["text"] = INSTRUCTION_KEY + rec["question"] + HEADER_KEY + "::".join(rec["table"]["header"]) + RESPONSE_KEY_NL + rec["sql"]["human_readable"] + END_KEY
+        return rec
+
+    dataset = dataset.map(_func)
+
+    return dataset
 
 def load_tokenizer(pretrained_model_name_or_path: str = DEFAULT_INPUT_MODEL) -> PreTrainedTokenizer:
     logger.info(f"Loading tokenizer for {pretrained_model_name_or_path}")
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.add_special_tokens({"additional_special_tokens": [END_KEY, INSTRUCTION_KEY, RESPONSE_KEY_NL]})
+    return tokenizer
+
+def load_wikisql_tokenizer(pretrained_model_name_or_path: str = DEFAULT_INPUT_MODEL) -> PreTrainedTokenizer:
+    logger.info(f"Loading tokenizer for {pretrained_model_name_or_path}")
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"additional_special_tokens": [END_KEY, INSTRUCTION_KEY, HEADER_KEY, RESPONSE_KEY_NL]})
     return tokenizer
 
 
@@ -156,6 +216,36 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_S
     return dataset
 
 
+
+def preprocess_wikisql_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_SEED) -> Dataset:
+    """Loads the training dataset and tokenizes it so it is ready for training.
+
+    Args:
+        tokenizer (AutoTokenizer): Tokenizer tied to the model.
+        max_length (int): Maximum number of tokens to emit from tokenizer.
+
+    Returns:
+        Dataset: HuggingFace dataset
+    """
+
+    dataset = load_wikisql_training_dataset()
+
+    logger.info("Preprocessing dataset")
+    _preprocessing_function = partial(preprocess_wikisql_batch, max_length=max_length, tokenizer=tokenizer)
+    dataset = dataset.map(
+        _preprocessing_function,
+        batched=True,
+        remove_columns=["question", "table", "sql", "text"],
+    )
+
+    logger.info("Shuffling dataset")
+    dataset = dataset.shuffle(seed=seed)
+
+    logger.info("Done preprocessing")
+
+    return dataset
+
+
 def train(
     local_output_dir,
     dbfs_output_dir,
@@ -180,7 +270,8 @@ def train(
     conf = model.config
     max_length: int = getattr(conf, "n_positions", getattr(conf, "seq_lenth", 1024))
 
-    processed_dataset = preprocess_dataset(tokenizer=tokenizer, max_length=max_length, seed=seed)
+    #processed_dataset = preprocess_dataset(tokenizer=tokenizer, max_length=max_length, seed=seed)
+    processed_dataset = preprocess_wikisql_dataset(tokenizer=tokenizer, max_length=max_length, seed=seed)
 
     split_dataset = processed_dataset.train_test_split(test_size=test_size, seed=seed)
 
